@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Multi-layer logistics network LP/MILP optimizer">
+  <link rel="icon" href="./assets/images/favicon.svg" type="image/svg+xml">
+  <title>Multi-layer Logistics Hub Optimizer Web by portlogistics.vn</title>
+
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <link rel="stylesheet" href="./css/styles.css?v=20261017">
+<style>
+.app-footer{
+  margin-top:24px;
+  padding:16px 18px;
+  text-align:center;
+  color:var(--muted);
+  font-size:13px;
+  background:var(--card);
+  border-top:1px solid var(--border);
+}
+.backend{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.backend .dot{width:8px;height:8px;border-radius:50%;background:#9ca3af}
+.backend .dot.ok{background:#16a34a}.backend .dot.bad{background:#dc2626}
+.backend-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.backend-bar select{font-size:12px;padding:3px 6px;max-width:100%}
+</style>
+
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <h1>Multi-layer Logistics Hub Optimizer Web</h1>
+    <p>Browser conversion of the MATLAB Stage-1 / v8 network-design and location-allocation model with LP, MILP, candidate node opening, echelon rules, CO₂, GIS-style display, sensitivity analysis, and Excel export.</p>
+    <div class="backend-bar">
+      <span class="backend" id="backendChip"><span class="dot" id="backendDot"></span><span id="backendText">Đang kết nối…</span></span>
+      <select id="backendSelect" aria-label="Máy chủ" title="Chọn máy chủ tính toán">
+        <option value="auto">Tự động (Home → Render)</option>
+        <option value="home">Home server</option>
+        <option value="render">Render</option>
+      </select>
+    </div>
+  </header>
+
+  <section class="toolbar">
+    <button id="importButton" type="button">Import Excel</button>
+    <input id="fileInput" type="file" accept=".xlsx,.xls" hidden>
+    <button id="demoButton" type="button">Load Built-in Demo</button>
+    <button id="downloadExampleButton" type="button">Download Example Excel</button>
+    <button id="validateButton" type="button" disabled>Validate Only</button>
+    <button id="runLPButton" type="button" disabled>Run LP</button>
+    <button id="runMILPButton" class="primary" type="button" disabled>Run MILP</button>
+    <button id="runBothButton" type="button" disabled>Run Both</button>
+    <button id="exportExcelButton" class="success" type="button" disabled>Export Results Excel</button>
+    <button id="exportPngButton" type="button" disabled>Export Figures PNG</button>
+  </section>
+
+  <section class="status-panel">
+    <div id="status" class="status">Import Excel is ready. Loading GLPK browser solver in the background…</div>
+    <div id="substatus" class="substatus">Required sheets: Supply, Demand, Params, Arcs. Optional sheets: Nodes, NodeConstraints, AllowedConnections.</div>
+    <div class="settings">
+      <label><input id="enforceEchelon" type="checkbox" checked> Enforce echelon structure</label>
+      <label><input id="showClosed" type="checkbox" checked> Show unused candidate arcs</label>
+      <label><input id="showLabels" type="checkbox" checked> Show node labels</label>
+      <label>Figure source:
+        <select id="sourceSelect"><option>Auto</option><option>MILP</option><option>LP</option></select>
+      </label>
+      <label>Mode:
+        <select id="modeSelect"><option>All</option><option>Road</option><option>Rail</option><option>Water</option><option>Sea</option></select>
+      </label>
+    </div>
+  </section>
+
+  <section class="kpi-strip">
+    <div class="kpi"><span>Total Cost</span><strong id="kpiCost">—</strong></div>
+    <div class="kpi"><span>Used Arcs</span><strong id="kpiUsed">—</strong></div>
+    <div class="kpi"><span>Open Arcs</span><strong id="kpiOpenArcs">—</strong></div>
+    <div class="kpi"><span>Open Nodes</span><strong id="kpiOpenNodes">—</strong></div>
+    <div class="kpi"><span>Total Export</span><strong id="kpiExport">—</strong></div>
+    <div class="kpi"><span>Total CO₂</span><strong id="kpiCO2">—</strong></div>
+  </section>
+
+  <main class="workspace">
+    <section class="panel">
+      <div class="panel-title">Used Arcs</div>
+      <div class="table-wrap"><table id="usedTable"><thead><tr><th>From</th><th>To</th><th>Mode</th><th>Flow</th><th>OpenY</th><th>UnitCost</th><th>FixedCost</th><th>ArcCost</th><th>IsExport</th><th>Cap</th><th>CO₂</th><th>Util%</th></tr></thead><tbody></tbody></table></div>
+    </section>
+    <section class="panel">
+      <div class="panel-title">Network Graph by Echelon</div>
+      <div class="canvas-area"><canvas id="networkCanvas" class="view" width="900" height="600"></canvas>
+        <div class="legend"><span class="legend-item"><span class="legend-line" style="background:var(--road)"></span>Road</span><span class="legend-item"><span class="legend-line" style="background:var(--rail)"></span>Rail</span><span class="legend-item"><span class="legend-line" style="background:var(--water)"></span>Water</span><span class="legend-item"><span class="legend-line" style="background:var(--sea)"></span>Sea</span></div>
+      </div>
+    </section>
+  </main>
+
+  <section class="tabs-panel">
+    <div class="tabs">
+      <button class="tab-button active" data-tab="dashboardTab">Dashboard</button>
+      <button class="tab-button" data-tab="kpiTab">KPI</button>
+      <button class="tab-button" data-tab="figuresTab">Figures</button>
+      <button class="tab-button" data-tab="gisTab">GIS Map</button>
+      <button class="tab-button" data-tab="animationTab">Animation</button>
+      <button class="tab-button" data-tab="sensitivityTab">Sensitivity</button>
+      <button class="tab-button" data-tab="auditTab">Validation & Audit</button>
+    </div>
+
+    <div id="dashboardTab" class="tab-content active">
+      <div class="dual-table">
+        <div><div class="card-title">Node Summary</div><div class="small-table"><table id="nodeSummaryTable"><thead><tr><th>Node</th><th>Role</th><th>Level</th><th>Inflow</th><th>Outflow</th><th>Throughput</th><th>Net</th><th>Open</th><th>OpenCost</th></tr></thead><tbody></tbody></table></div></div>
+        <div><div class="card-title">Node Open Decisions</div><div class="small-table"><table id="nodeOpenTable"><thead><tr><th>Node</th><th>Role</th><th>Level</th><th>Candidate</th><th>MustOpen</th><th>FixedCost</th><th>CapWhenOpen</th><th>Open</th><th>Paid</th></tr></thead><tbody></tbody></table></div></div>
+      </div>
+      <div style="margin-top:10px"><div class="card-title">All Candidate Arcs</div><div class="small-table" style="max-height:430px"><table id="allArcTable"><thead><tr><th>From</th><th>To</th><th>Mode</th><th>Flow</th><th>OpenY</th><th>Used</th><th>UnitCost</th><th>FixedCost</th><th>ArcCost</th><th>IsExport</th><th>Cap</th><th>CO₂</th><th>Util%</th></tr></thead><tbody></tbody></table></div></div>
+    </div>
+
+    <div id="kpiTab" class="tab-content">
+      <div class="grid3">
+        <article class="card"><div class="card-title">Network KPIs: LP vs MILP</div><div class="chart-wrap"><canvas id="networkKpiChart"></canvas></div></article>
+        <article class="card"><div class="card-title">Flow KPIs: LP vs MILP</div><div class="chart-wrap"><canvas id="flowKpiChart"></canvas></div></article>
+        <article class="card"><div class="card-title">Cost KPIs: LP vs MILP</div><div class="chart-wrap"><canvas id="costKpiChart"></canvas></div></article>
+      </div>
+    </div>
+
+    <div id="figuresTab" class="tab-content">
+      <div class="grid2">
+        <article class="card"><div class="card-title">Flow by Mode</div><div class="chart-wrap"><canvas id="modeFlowChart"></canvas></div></article>
+        <article class="card"><div class="card-title">Arc Utilization</div><div class="chart-wrap"><canvas id="utilChart"></canvas></div></article>
+        <article class="card"><div class="card-title">Flow by Echelon</div><div class="chart-wrap"><canvas id="echelonChart"></canvas></div></article>
+        <article class="card"><div class="card-title">Node Throughput</div><div class="chart-wrap"><canvas id="nodeChart"></canvas></div></article>
+      </div>
+    </div>
+
+    <div id="gisTab" class="tab-content">
+      <div class="controls-row"><span>Uses Lat/Lon from Nodes. Source and mode filters above also apply.</span></div>
+      <canvas id="gisCanvas" class="view" width="1200" height="620"></canvas>
+    </div>
+
+    <div id="animationTab" class="tab-content">
+      <div class="controls-row"><button id="playButton" disabled>Play</button><button id="resetAnimButton" disabled>Reset</button><span>Speed</span><input id="speedInput" type="range" min="0.25" max="4" step="0.25" value="1" disabled><strong id="speedLabel">1.00×</strong><span id="animInfo" class="info">Run a model first.</span></div>
+      <canvas id="animationCanvas" class="view" width="1200" height="620"></canvas>
+    </div>
+
+    <div id="sensitivityTab" class="tab-content">
+      <div class="sens-grid">
+        <div class="form-box"><label>Scenario</label><select id="sensScenario"><option value="demand">Demand</option><option value="fixedcost">Node fixed cost</option><option value="capacity">Node capacity</option><option value="modecap">Mode capacities</option></select><label>Scales</label><input id="sensScales" type="text" value="0.8, 1.0, 1.2"><button id="runSensitivityButton" class="primary" disabled>Run MILP Sensitivity</button><p style="font-size:10px;color:var(--muted);line-height:1.45">Each scenario is solved independently. Infeasible scales are reported rather than silently modified.</p></div>
+        <div><div class="chart-wrap"><canvas id="sensitivityChart"></canvas></div><div class="small-table" style="margin-top:9px"><table id="sensitivityTable"><thead><tr><th>Scenario</th><th>Scale</th><th>Status</th><th>TotalCost</th><th>OpenNodes</th><th>TotalCO₂</th></tr></thead><tbody></tbody></table></div></div>
+      </div>
+    </div>
+
+    <div id="auditTab" class="tab-content">
+      <div id="validationLog" style="padding:10px;border:1px solid var(--border);border-radius:7px;background:#0f172a;color:#d1fae5;font:11px/1.5 Consolas,monospace;white-space:pre-wrap;max-height:500px;overflow:auto">No workbook loaded.</div>
+    </div>
+  </section>
+
+  <div class="footer">Converted from the uploaded MATLAB multi-file Stage-1 / v8 project. Browser results use GLPK and can differ slightly from MATLAB linprog/intlinprog.</div>
+</div>
+
+<footer class="app-footer">
+  © 2026 Nguyen Minh Quy – portlogistics.vn
+</footer>
+
+<script src="./js/config.js?v=20261017"></script>
+<script src="./js/app.js?v=20261017"></script>
+</body>
+</html>
